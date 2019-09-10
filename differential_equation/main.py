@@ -6,25 +6,33 @@ import matplotlib.pyplot as plt
 
 class Courrant():
     '''
-    Class to compute the courrant number for the
+    Class with methods to compute the Courrant number for linear and nonlinear advection
     '''
 
     def __init__(self, mode, dt, dx, constant_u):
+        """
+        :param mode: str
+        :param dt: float
+        :param dx: float
+        :param constant_u: float
+        """
         self.mode = mode
         self.dt = dt
         self.dx = dx
-        self.linear_courrant = constant_u * dx / dx
+        self.linear_courrant = constant_u * dt / dx
 
-    def linear(self, *args):
+    def linear(self, *args, **kwargs):
         return self.linear_courrant
 
-    def nonlinear(self, dt, dx, u):
-        return u * dt / dx
+    def nonlinear(self, u):
+        return u * self.dt / self.dx
 
+
+def initialCondition_2(x):
+    return np.where(x % 1 < 0.5, np.power(np.sin(2 * x * np.pi), 2), 1e-5)
 
 def initialCondition(x):
-    return np.where(x % 1 < 0.5, np.power(np.sin(2 * x * np.pi), 2), 0)
-
+    return np.power(np.sin(2 * x * np.pi), 2)
 
 def Diffusion(phi_downwind, phi_upwind, phi, dx, dt, Diff=True):
     """
@@ -52,10 +60,11 @@ def Diffusion(phi_downwind, phi_upwind, phi, dx, dt, Diff=True):
 
 def main(mode='linear', Diff=False):
     # ---- Fixed parameters ----#
-    nx = 20
+    nx = 50
+    output_rate = 10 # output saved every N timesteps
     x = np.linspace(0, 1, nx + 1)
     fixed_u = 1  # for linear advection
-    nt = 2000
+    nt = 500
     dx = 1 / nx
     dt = 0.5e-3
 
@@ -64,42 +73,52 @@ def main(mode='linear', Diff=False):
     if mode == 'linear':
         c = courrant.linear
     elif mode == 'nonlinear':
-        c = Courrant.nonlinear
+        c = courrant.nonlinear
     else:
         raise ValueError(f"Mode {mode} not supported")
 
     # ---- Initializing xr.DataArray to store model outputs ---- #
-    array = xr.DataArray(np.zeros([int(nt), int(nx + 1)]), dims=['time', 'x'],
-                         coords={'time': np.arange(nt) * dt, 'x': x})
+    time_coord = np.arange(0, nt, output_rate) * dt
+    array = xr.DataArray(np.zeros([time_coord.shape[0], int(nx + 1)]), dims=['time', 'x'],
+                         coords={'time': time_coord, 'x': x})
 
     phi = initialCondition(x)
     phiNew = phi.copy()
     phiOld = phi.copy()
 
-    # FTCS for the first time-step
+    # ---- FTCS for the first time-step ---- #
     for j in range(1, nx):
-        phi[j] = phiOld[j] - 0.5 * c(dt, dx, phi[j]) * (phiOld[j + 1] - phiOld[j - 1]) + \
+        phi[j] = phiOld[j] - 0.5 * c(phi[j]) * (phiOld[j + 1] - phiOld[j - 1]) + \
                  Diffusion(phi[j + 1], phi[j - 1], phi[j], dx, dt, Diff)
 
-    phi[0] = phiOld[0] - 0.5 * c(dt, dx, phi[0]) * (phiOld[1] - phiOld[nx - 1]) + \
-             Diffusion(phi[1], phi[nx - 1], phi[0], dx, dt, Diff)
+    phi[0] = phiOld[0] - 0.5 * c(u=phi[0]) * (phiOld[1] - phiOld[nx - 1]) + \
+             Diffusion(phiOld[1], phiOld[nx - 1], phiOld[0], dx, dt, Diff)
     phi[nx] = phi[0]
-    array[0, :] = phi
 
+    # ---- CTCS integration ---- #
     for n in range(1, nt):
         for j in range(1, nx):
-            phiNew[j] = phiOld[j] - c(dt, dx, phi[j]) * (phi[j + 1] - phi[j - 1]) + \
-                        Diffusion(phi[j + 1], phi[j - 1], phi[j], dx, dt, Diff)
-        phiNew[0] = phiOld[0] - c(dt, dx, phi[0]) * (phi[1] - phi[nx - 1]) + \
+            phiNew[j] = phiOld[j] - c(phi[j]) * (phi[j + 1] - phi[j - 1]) + \
+                        Diffusion(phiOld[j + 1], phiOld[j - 1], phiOld[j], dx, 2*dt, Diff)
+
+        phiNew[0] = phiOld[0] - c(phi[0]) * (phi[1] - phi[nx - 1]) + \
                     Diffusion(phi[1], phi[nx - 1], phi[0], dx, dt, Diff)
         phiNew[nx] = phiNew[0]
-        array[n, :] = phi
+        if n % output_rate == 0:
+            array.loc[n*dt, ] = phi
+
         phiOld = phi.copy()
         phi = phiNew.copy()
-    print(array)
+
+    # ---- Plotting ---- #
+
     array.plot(x='x', cmap='nipy_spectral', vmin=0)
+    plt.show()
+    plt.close()
+    array.isel(time=1).plot()
+    array.plot.line(x='x')
     plt.show()
 
 
 if __name__ == "__main__":
-    main(mode='nonlinear', Diff=False)
+    main(mode='nonlinear', Diff=True)
