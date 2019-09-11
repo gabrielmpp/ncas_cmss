@@ -9,14 +9,13 @@ class Courrant():
     Class with methods to compute the Courrant number for linear and nonlinear advection
     '''
 
-    def __init__(self, mode, dt, dx, constant_u):
+    def __init__(self, dt, dx, constant_u):
         """
         :param mode: str
         :param dt: float
         :param dx: float
         :param constant_u: float
         """
-        self.mode = mode
         self.dt = dt
         self.dx = dx
         self.linear_courrant = constant_u * dt / dx
@@ -58,18 +57,16 @@ def Diffusion(phi_downwind, phi_upwind, phi, dx, dt, Diff=True):
     return diffusion
 
 
-def main(mode='linear', Diff=False):
+def main(mode='linear', Diff=False, nt=500, dt=0.5e-3):
     # ---- Fixed parameters ----#
     nx = 50
     output_rate = 10 # output saved every N timesteps
     x = np.linspace(0, 1, nx + 1)
     fixed_u = 1  # for linear advection
-    nt = 500
     dx = 1 / nx
-    dt = 0.5e-3
 
     # ---- Initializing appropriate method for computing c*du/dx ---- #
-    courrant = Courrant('linear', dt, dx, fixed_u)
+    courrant = Courrant(dt, dx, fixed_u)
     if mode == 'linear':
         c = courrant.linear
     elif mode == 'nonlinear':
@@ -95,7 +92,7 @@ def main(mode='linear', Diff=False):
              Diffusion(phiOld[1], phiOld[nx - 1], phiOld[0], dx, dt, Diff)
     phi[nx] = phi[0]
 
-    # ---- CTCS integration ---- #
+    # ---- CTCS advection FTCS diffusion integration ---- #
     for n in range(1, nt):
         for j in range(1, nx):
             phiNew[j] = phiOld[j] - c(phi[j]) * (phi[j + 1] - phi[j - 1]) + \
@@ -119,6 +116,59 @@ def main(mode='linear', Diff=False):
     array.plot.line(x='x')
     plt.show()
 
+def semi_lagrangian(Diff=False, nt=10, dt = 0.5e-3):
+
+    # ---- Fixed parameters ----#
+    nx = 50
+    output_rate = 1  # output saved every N timesteps
+    x = np.linspace(0, 1, nx + 1)
+    fixed_u = 1  # for linear advection
+    dx = 1 / nx
+
+    # ---- Initializing appropriate method for computing c*du/dx ---- #
+    c = Courrant(dt, dx, fixed_u).nonlinear
+
+    # ---- Initializing xr.DataArray to store model outputs ---- #
+    time_coord = np.arange(0, nt, output_rate) * dt
+    array = xr.DataArray(np.zeros([time_coord.shape[0], int(nx + 1)]), dims=['time', 'x'],
+                             coords={'time': time_coord, 'x': x})
+
+    phi = xr.DataArray(initialCondition(x), dims=['x'], coords={'x': x})
+    phiNew = phi.copy()
+    array_list = []
+
+    # ---- FTCS for the first time-step ---- #
+    for j in range(0, nx+1):
+        phiNew[j % nx] = (phi.interp(x=cyclic(x, x[j] - phi[j]*dt), kwargs={'fill_value': None})) + \
+                 Diffusion(phi[(j + 1) % nx], phi[(j - 1) % nx], phi[j], dx, dt, Diff)
+
+    array_list.append(phiNew.copy())
+
+        # ---- CTCS advection FTCS diffusion integration ---- #
+    for n in range(1, nt):
+        for j in range(0, nx+1):
+             phiNew[j % nx] = (phi.interp(x=cyclic(x, x[j] - phi[j]*dt), kwargs={'fill_value': None})) + \
+                            Diffusion(phi[(j + 1)%nx], phi[(j - 1)%nx], phi[j], dx, 2 * dt, Diff)
+
+        if n % output_rate == 0:
+            array_list.append(phiNew.copy())
+
+        phi = phiNew.copy()
+    array = xr.concat(array_list, dim=time_coord)
+    array = array.rename({'concat_dim':'time'})
+    array.plot.line(x='x')
+    plt.show()
+
+
+def cyclic(x, pos):
+    if pos >= max(x):
+        return pos - max(x)
+    if pos <= min(x):
+        return max(x) - abs(pos)
+    else:
+        return pos
 
 if __name__ == "__main__":
-    main(mode='nonlinear', Diff=True)
+
+    #main(mode="nonlinear", Diff=True, nt=50, dt=0.5e-2)
+    semi_lagrangian(Diff=False, nt=20, dt=0.5e-1)
