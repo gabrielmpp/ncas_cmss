@@ -20,17 +20,19 @@ class Courrant():
         self.dx = dx
         self.linear_courrant = constant_u * dt / dx
 
+
     def linear(self, *args, **kwargs):
+        print(self.linear_courrant)
         return self.linear_courrant
 
     def nonlinear(self, u):
         return u * self.dt / self.dx
 
 
-def initialCondition_2(x):
+def initialCondition(x):
     return np.where(x % 1 < 0.5, np.power(np.sin(2 * x * np.pi), 2), 1e-5)
 
-def initialCondition(x):
+def initialCondition2(x):
     return np.power(np.sin(2 * x * np.pi), 2)
 
 def Diffusion(phi_downwind, phi_upwind, phi, dx, dt, Diff=True):
@@ -67,6 +69,7 @@ def main(mode='linear', Diff=False, nt=500, dt=0.5e-3):
 
     # ---- Initializing appropriate method for computing c*du/dx ---- #
     courrant = Courrant(dt, dx, fixed_u)
+    print(courrant.linear_courrant)
     if mode == 'linear':
         c = courrant.linear
     elif mode == 'nonlinear':
@@ -109,17 +112,13 @@ def main(mode='linear', Diff=False, nt=500, dt=0.5e-3):
 
     # ---- Plotting ---- #
 
-    array.plot(x='x', cmap='nipy_spectral', vmin=0)
-    plt.show()
-    plt.close()
-    array.isel(time=1).plot()
-    array.plot.line(x='x')
-    plt.show()
 
-def semi_lagrangian(Diff=False, nt=10, dt = 0.5e-3):
+    return array
+
+def semi_lagrangian(Diff=False, nt=10, dt = 0.5e-3, interp='cubic'):
 
     # ---- Fixed parameters ----#
-    nx = 50
+    nx = 100
     output_rate = 1  # output saved every N timesteps
     x = np.linspace(0, 1, nx + 1)
     fixed_u = 1  # for linear advection
@@ -139,7 +138,7 @@ def semi_lagrangian(Diff=False, nt=10, dt = 0.5e-3):
 
     # ---- FTCS for the first time-step ---- #
     for j in range(0, nx+1):
-        phiNew[j % nx] = (phi.interp(x=cyclic(x, x[j] - phi[j]*dt), kwargs={'fill_value': None})) + \
+        phiNew[j % nx] = (phi.interp(method=interp,x=cyclic(x, x[j] - phi[j]*dt), kwargs={'fill_value': None})) + \
                  Diffusion(phi[(j + 1) % nx], phi[(j - 1) % nx], phi[j], dx, dt, Diff)
 
     array_list.append(phiNew.copy())
@@ -147,7 +146,7 @@ def semi_lagrangian(Diff=False, nt=10, dt = 0.5e-3):
         # ---- CTCS advection FTCS diffusion integration ---- #
     for n in range(1, nt):
         for j in range(0, nx+1):
-             phiNew[j % nx] = (phi.interp(x=cyclic(x, x[j] - phi[j]*dt), kwargs={'fill_value': None})) + \
+             phiNew[j % nx] = (phi.interp(method=interp,x=cyclic(x, x[j] - phi[j]*dt), kwargs={'fill_value': None})) + \
                             Diffusion(phi[(j + 1)%nx], phi[(j - 1)%nx], phi[j], dx, 2 * dt, Diff)
 
         if n % output_rate == 0:
@@ -158,7 +157,7 @@ def semi_lagrangian(Diff=False, nt=10, dt = 0.5e-3):
     array = array.rename({'concat_dim':'time'})
     array.plot.line(x='x')
     plt.show()
-
+    return array
 
 def cyclic(x, pos):
     if pos >= max(x):
@@ -170,5 +169,11 @@ def cyclic(x, pos):
 
 if __name__ == "__main__":
 
-    #main(mode="nonlinear", Diff=True, nt=50, dt=0.5e-2)
-    semi_lagrangian(Diff=False, nt=20, dt=0.5e-1)
+    array = main(mode="nonlinear", Diff=False, nt=500, dt=0.1e-2)
+    array_linear = semi_lagrangian(Diff=False, nt=200, dt=0.5e-1, interp='linear')
+    #array_cubic = semi_lagrangian(Diff=False, nt=50, dt=0.5e-1, interp='quadratic')
+    array_linear.sum('x').plot()
+    array_quadratic.sum('x').plot()
+    array.isel(time=slice(1,None)).plot.line(x='x', add_legend=False)
+
+    plt.show()
